@@ -1,0 +1,74 @@
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: migrator
+      POSTGRES_PASSWORD: migrator_password
+      POSTGRES_DB: linkup
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./linkup.dump:/docker-entrypoint-initdb.d/linkup.dump
+
+  restore:
+    image: pgvector/pgvector:pg17
+    depends_on:
+      - db
+    environment:
+      PGPASSWORD: migrator_password
+    volumes:
+      - ./linkup.dump:/tmp/linkup.dump
+    entrypoint: [
+        "sh",
+        "-c",
+        "until pg_isready -h db -U migrator; do sleep 1; done && \
+        psql -h db -U migrator -d postgres -c 'DROP DATABASE IF EXISTS linkup;' &&
+        psql -h db -U migrator -d postgres -c 'CREATE DATABASE linkup;' &&
+        pg_restore -h db -U migrator -d linkup /tmp/linkup.dump \
+        --no-owner --no-privileges && \
+        psql -h db -U migrator -d linkup -c \"
+        GRANT CONNECT ON DATABASE linkup TO linkup_user;
+        GRANT USAGE ON SCHEMA public TO linkup_user;
+        GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO linkup_user;
+        GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO linkup_user;
+        ALTER DEFAULT PRIVILEGES IN SCHEMA public
+        GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO linkup_user;
+        \"
+        ",
+      ]
+
+  api:
+    build: .
+    environment:
+      DATABASE_URL_PREFIX: postgresql://linkup_user:password@db:5432
+      DATABASE_NAME: linkup
+      ALEMBIC_DATABASE_URL_PREFIX: postgresql://migrator:migrator_password@db:5432
+      TEST_DATABASE_NAME: linkup_test
+    depends_on:
+      - db
+    ports:
+      - "8000:8000"
+    command: >
+      sh -c "
+      until pg_isready -h db -U migrator; do sleep 1; done &&
+      echo 'Database ready. Running migrations…' &&
+      uv run alembic -c /backend/alembic.ini upgrade head &&
+      uv run uvicorn app.app:app --host 0.0.0.0 --port 8000
+      "
+
+  tests:
+    build: .
+    environment:
+      DATABASE_URL_PREFIX: postgresql://linkup_user:password@db:5432
+      DATABASE_NAME: linkup
+      ALEMBIC_DATABASE_URL_PREFIX: postgresql://migrator:migrator_password@db:5432
+      TEST_DATABASE_NAME: linkup_test
+    depends_on:
+      - db
+    command: >
+      sh -c "
+      until pg_isready -h db -U migrator; do sleep 1; done &&
+      uv run alembic -c /backend/alembic.ini upgrade head &&
+      uv run pytest
+      "

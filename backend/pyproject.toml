@@ -1,0 +1,28 @@
+[project]
+name = "backend"
+version = "0.1.0"
+requires-python = ">=3.10"
+
+dependencies = [
+  "fastapi[standard]",
+  "uvicorn",
+  "sqlalchemy",
+  "psycopg2-binary",
+  "python-dotenv",
+  "alembic",
+  "scrapy==2.13.4",
+  "pgvector>=0.4.2",
+  "sentence-transformers>=5.2.0",
+]
+
+[tool.uv]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.14.10",
+    "factory-boy>=3.3.3",
+    "pytest-factoryboy>=2.8.1",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["." ]
